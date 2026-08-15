@@ -1,10 +1,10 @@
 # camgate — 大华摄像头 MCP 网关
 
-把大华网络摄像头变成标准的 **MCP Server**,让任何支持 MCP 的 AI 客户端(Claude Desktop / Cursor / opencode / Cherry Studio 等)都能直接控制摄像头:云台旋转、绝对定位、预置点、抓图、语音播报。
+把大华网络摄像头变成标准的 **MCP Server**,让任何支持 MCP 的 AI 客户端(Claude Desktop / Cursor / opencode / Cherry Studio 等)都能直接控制摄像头:云台旋转、绝对定位、预置点、抓图、语音播报,还能**语音识别喊话**、**本地视觉看图**(Qwen3.5-0.8B)。
 
 ## 功能
 
-MCP 工具(共 9 个):
+MCP 工具(共 11 个):
 
 | 工具 | 说明 |
 |------|------|
@@ -17,6 +17,8 @@ MCP 工具(共 9 个):
 | `preset` | 预置点 set/goto/del |
 | `capture` | 抓取一帧画面保存到 media/ |
 | `speak` | 文字 TTS 通过摄像头扬声器播报(中文, G711 mu-law) |
+| `listen` | 采集摄像头麦克风并语音识别为文字(faster-whisper, 本地) |
+| `analyze_image` | 抓图并用本地视觉模型分析画面内容(内置 Qwen3.5-0.8B) |
 
 ## 快速开始
 
@@ -25,6 +27,25 @@ MCP 工具(共 9 个):
 - Python ≥ 3.12, [uv](https://docs.astral.sh/uv/)
 - `ffmpeg`(语音播报用): `apt install ffmpeg`
 - 大华官方 Python NetSDK(wheel 已内置在 `vendor/`)
+
+### 本地语音识别 + 视觉模型(可选)
+
+`listen`(whisper)和 `analyze_image`(Qwen3.5-0.8B)需要本地模型,首次会自动从 HuggingFace 下载:
+
+```bash
+# 语音识别模型 (faster-whisper small, ~460MB, 缓存在 ~/.cache/huggingface/)
+uv run python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+# 视觉模型 (文本 GGUF ~508MB + 视觉投影 ~198MB, 放到 models/qwen35-0.8b-unsloth/)
+mkdir -p models
+uv run python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('unsloth/Qwen3.5-0.8B-GGUF', local_dir='models/qwen35-0.8b-unsloth',
+                  allow_patterns=['Qwen3.5-0.8B-Q4_K_M.gguf','mmproj-BF16.gguf'])
+"
+```
+
+> 国内网络可先 `export HF_ENDPOINT=https://hf-mirror.com`。也可以设 `VISION_TEXT_GGUF` / `VISION_MMPROJ` 环境变量指向自己的模型文件。
 
 ### 2. 安装
 
@@ -88,6 +109,35 @@ uv run camgate gateway   # 可选: 启动 HTTP 网关 (127.0.0.1:8080)
 - **无麦克风采集**: `StartTalkEx`/`RecordStartEx` 在该设备返回失败, 不支持把摄像头麦克风音频上行到 PC(只能播放, 不能录制)。
 - **无变倍(Zoom)**: 云台只有 Pan/Tilt, `zoomin/zoomout` 无效。
 
+### 麦克风采集
+
+该设备**支持上行采集音频**(对讲通道空闲时):`listen` 工具用 `StartTalkByDataType` 采到 **8000Hz 16bit PCM**,交给本地 faster-whisper 识别。
+
+注意:
+- 若报错误 `talk has opened by other client`(对讲通道被占用),**重启摄像头**即可恢复(演示 `scripts/test_mic.py`)。
+- 设备有静音抑制,录音时**大声、持续**说话效果更好;静音片段不会被回传,识别出的文字可能略有重复。
+
+### 语音/视觉控制闭环
+
+喊话控制云台的链路已经全部打通:
+
+```
+对摄像头喊话 → listen(whisper 识别成文字) → LLM 解析意图 → ptz_move/ptz_abs_move 执行
+抓一帧画面 → analyze_image(本地 Qwen3.5-0.8B 看图) → 画面内容
+```
+
+## 弱服务器部署(4G 内存、无 GPU)
+
+所有识别都在本地 CPU 推理,适合低配机器:
+
+| 组件 | 内存占用 |
+|------|---------|
+| faster-whisper `small` (int8) | ~1GB |
+| Qwen3.5-0.8B Q4_K_M + mmproj | ~0.7GB(加载后常驻) |
+| 系统 + 摄像头 SDK | <1GB |
+
+> 共约 2-2.5GB,4G 内存机器可跑。若要更省,whisper 可换 `base`(环境变量 `ASR_MODEL`),视觉可用 Q3 量化。
+
 ## 目录结构
 
 ```
@@ -95,9 +145,11 @@ camgate/
   camgate/
     __main__.py    # CLI 入口 (gateway/agent/mcp)
     config.py      # 配置加载
-    camera.py      # NetSDK 封装 (登录/云台/抓图/对讲/绝对定位)
+    camera.py      # NetSDK 封装 (登录/云台/抓图/对讲/绝对定位/录音)
     gateway.py     # HTTP 网关
     tts.py         # TTS 转 G711 音频
+    asr.py         # 语音识别 (faster-whisper)
+    vision.py      # 本地视觉理解 (Qwen3.5-0.8B)
     mcp_server.py  # MCP server (核心)
     agent.py       # 可选: AI 交互助手
   scripts/

@@ -309,7 +309,6 @@ class Camera:
 
     # ---------- 扬声器 / 对讲 ----------
     def speak_file(self, g711a_path, sample_rate=8000, audio_bit=8, codec="mulaw"):
-        """把裸音频文件(alaw/mulaw)推送到摄像头扬声器"""
         if self.loginID == 0:
             raise CameraError("未登录")
 
@@ -356,3 +355,59 @@ class Camera:
             self.sdk.StopTalkSendDataByFile(handle)
             self.sdk.StopTalkEx(handle)
         return True
+
+    # ---------- 麦克风采集 ----------
+    def record_audio(self, seconds=5.0):
+        """采集摄像头麦克风音频, 返回 (pcm16_bytes, sample_rate, audio_bit).
+        用 StartTalkByDataType 全双工对讲通道, 收到设备麦克风上行的裸 PCM 音频.
+        """
+        from NetSDK.SDK_Struct import (
+            NET_IN_START_TALK_INFO,
+            NET_OUT_START_TALK_INFO,
+            NET_AUDIO_DATA_CB_INFO,
+            C_ENUM,
+        )
+        from NetSDK.SDK_Callback import CB_FUNCTYPE
+        import ctypes as _ct
+
+        if self.loginID == 0:
+            raise CameraError("未登录")
+
+        _TALK_CB = CB_FUNCTYPE(None, C_LLONG, _ct.POINTER(NET_AUDIO_DATA_CB_INFO), C_ENUM, C_LDWORD)
+
+        buffer = []
+        meta = {}
+
+        @_TALK_CB
+        def _cb(lTalkHandle, pInfo, emAudioCode, dwUser):
+            if not pInfo:
+                return
+            info = pInfo.contents
+            if info.dwRawBufSize > 0 and info.pRawBuf:
+                raw = _ct.string_at(info.pRawBuf, info.dwRawBufSize)
+                buffer.append(raw)
+            meta.setdefault("rate", info.dwSampleRate)
+            meta.setdefault("bit", info.nAudioBit)
+            meta.setdefault("code", emAudioCode)
+
+        in_param = NET_IN_START_TALK_INFO()
+        in_param.dwSize = ctypes.sizeof(in_param)
+        in_param.pfAudioDataCallBackEx = _cb
+        in_param.dwUser = C_LDWORD(0)
+
+        out_param = NET_OUT_START_TALK_INFO()
+        out_param.dwSize = ctypes.sizeof(out_param)
+
+        handle = self.sdk.StartTalkByDataType(self.loginID, in_param, out_param, 3000)
+        if not handle:
+            raise CameraError(f"开启麦克风采集失败: {self.sdk.GetLastErrorMessage()}")
+
+        try:
+            time.sleep(float(seconds))
+        finally:
+            self.sdk.StopTalkEx(handle)
+
+        if not buffer:
+            raise CameraError("未采集到音频数据(设备可能无麦克风或通道被占用)")
+        pcm = b"".join(buffer)
+        return pcm, meta.get("rate", 8000), meta.get("bit", 16)

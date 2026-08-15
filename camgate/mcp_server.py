@@ -24,6 +24,8 @@ from mcp.types import (
 from camgate.config import load_config
 from camgate.camera import Camera, CameraError
 from camgate.tts import text_to_g711a
+from camgate.asr import transcribe_pcm16
+from camgate.vision import analyze_image as _analyze_image
 
 cfg = load_config()
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
@@ -148,6 +150,38 @@ def t_speak(args):
         return _fail(e)
 
 
+def t_listen(args):
+    seconds = float(args.get("seconds", 5))
+    try:
+        pcm, rate, bit = _get_cam().record_audio(seconds)
+        text = transcribe_pcm16(pcm, rate)
+        return _ok(
+            seconds=seconds,
+            sample_rate=rate,
+            audio_bit=bit,
+            audio_bytes=len(pcm),
+            transcript=text,
+        )
+    except CameraError as e:
+        return _fail(e)
+
+
+def t_analyze_image(args):
+    prompt = args.get("prompt", "")
+    try:
+        frame = _get_cam().capture()
+        fpath = os.path.join(MEDIA_DIR, f"vision_{int(time.time()*1000)}.jpg")
+        with open(fpath, "wb") as f:
+            f.write(frame)
+        if prompt:
+            result = _analyze_image(fpath, prompt)
+        else:
+            result = _analyze_image(fpath)
+        return _ok(path=fpath, result=result)
+    except Exception as e:
+        return _fail(e)
+
+
 # ---------- 工具元数据 ----------
 TOOLS = [
     Tool(
@@ -220,6 +254,28 @@ TOOLS = [
             "required": ["text"],
         },
     ),
+    Tool(
+        name="listen",
+        description="采集摄像头麦克风声音并语音识别为文字。seconds: 录音时长(秒, 默认5)。用于喊话控制: 识别出的文字可再交给 LLM 解析为云台指令。",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "seconds": {"type": "number", "minimum": 1, "maximum": 30, "default": 5}
+            },
+            "required": [],
+        },
+    ),
+    Tool(
+        name="analyze_image",
+        description="抓取当前画面并用本地视觉模型(内置 Qwen3.5-0.8B)识别, 返回画面内容和路径。prompt: 可选, 自定义提问(默认中文描述画面)。适合问'现在画面里有什么/有没有人'等。",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "自定义提问, 如 '画面里有人吗?'"}
+            },
+            "required": [],
+        },
+    ),
 ]
 
 HANDLERS = {
@@ -232,6 +288,8 @@ HANDLERS = {
     "preset": t_preset,
     "capture": t_capture,
     "speak": t_speak,
+    "listen": t_listen,
+    "analyze_image": t_analyze_image,
 }
 
 

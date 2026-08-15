@@ -6,6 +6,8 @@ dependencies = [
     "netsdk",
     "edge-tts",
     "mcp>=2.0.0",
+    "faster-whisper>=1.0.0",
+    "llama-cpp-python>=0.3.34",
 ]
 
 [build-system]
