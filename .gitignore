@@ -1,0 +1,22 @@
+# 本地真实配置(含摄像头凭据), 不入库
+config.ini
+
+# 抓图/语音产物
+media/
+
+# 会话记录
+session-*.json
+session-*.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+
+# 编辑器和系统
+.DS_Store
+.idea/
+.vscode/
