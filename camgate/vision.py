@@ -7,6 +7,10 @@
 """
 import os
 
+# 模型已在本地缓存, 加载时禁止联网检查
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 _MODEL_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "models",

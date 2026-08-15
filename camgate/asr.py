@@ -3,6 +3,10 @@
 import os
 import tempfile
 
+# 模型已在本地缓存, 加载时禁止联网检查(HF 会在加载时尝试访问 Hub, 无代理时卡住)
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 _WHISPER_MODEL = os.environ.get("ASR_MODEL", "small")
 _model = None
 

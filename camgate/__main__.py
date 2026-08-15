@@ -33,6 +33,12 @@ def cmd_agent(args):
     main()
 
 
+def cmd_voice(args):
+    from .voice import main as voice_main
+
+    voice_main()
+
+
 def cmd_mcp(args):
     from .mcp_server import main as mcp_main
 
@@ -41,9 +47,10 @@ def cmd_mcp(args):
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python -m camgate {gateway|agent|mcp}")
+        print("用法: python -m camgate {gateway|agent|voice|mcp}")
         print("  gateway  启动 HTTP 网关(需先配置 config.ini)")
         print("  agent    启动 AI 交互助手(需设置 [ai] api_key)")
+        print("  voice    启动语音对话助手(监听麦克风+云 LLM+扬声器回应)")
         print("  mcp      启动 MCP server(stdin/stdout 协议, 供支持 MCP 的 agent 接入)")
         sys.exit(1)
     cmd = sys.argv[1]
@@ -51,6 +58,8 @@ def main():
         cmd_gateway(sys.argv[2:])
     elif cmd == "agent":
         cmd_agent(sys.argv[2:])
+    elif cmd == "voice":
+        cmd_voice(sys.argv[2:])
     elif cmd == "mcp":
         cmd_mcp(sys.argv[2:])
     else:

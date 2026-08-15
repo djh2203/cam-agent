@@ -126,6 +126,21 @@ uv run camgate gateway   # 可选: 启动 HTTP 网关 (127.0.0.1:8080)
 抓一帧画面 → analyze_image(本地 Qwen3.5-0.8B 看图) → 画面内容
 ```
 
+### 语音对话助手(对讲机模式)
+
+命令行启动后**一直监听**摄像头,识别到你说话就交给云 LLM 理解并控制摄像头,回复通过扬声器播报:
+
+```bash
+uv run camgate voice
+```
+
+```
+你喊"往右转" → whisper 识别(本地) → 云 LLM(function calling) → ptz_move 执行 → 扬声器回应
+```
+
+- 意图理解用 `config.ini [ai]` 的 OpenAI 兼容接口(可填 `chat_model = auto` 自动选模型)。
+- `listen`(听)、`analyze_image`(本地看图)都在本地,只有 LLM 决策走云端。
+
 ## 弱服务器部署(4G 内存、无 GPU)
 
 所有识别都在本地 CPU 推理,适合低配机器:
