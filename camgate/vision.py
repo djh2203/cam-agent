@@ -1,69 +1,68 @@
 # coding=utf-8
-"""本地视觉理解: 用 Qwen3.5-0.8B (GGUF + mmproj, llama-cpp-python) 分析摄像头画面。
+"""本地视觉理解: 用 Qwen3.5-0.8B 分析摄像头画面.
 
-- 模型文件默认放在 models/qwen35-0.8b-unsloth/ 下(文本 GGUF + 配套视觉投影)。
-- 懒加载单例, 首次调用时加载 ~700MB, 之后复用。
-- 适合 4G 内存的无 GPU 服务器 (Q4_K_M 文本 ~508MB + mmproj ~198MB)。
+通过本地 llama-server (llama.cpp 官方二进制, OpenAI 兼容 API) 提供视觉能力:
+  llama-server -m Qwen3.5-0.8B-Q4_K_M.gguf --mmproj mmproj-BF16.gguf \\
+      --host 127.0.0.1 --port 8081 --reasoning off
+
+llama-cpp-python 的 mmproj 参数在 0.3.34 中不生效(视觉从未真正加载), 故改用 llama-server。
+模型文件在 models/qwen35-0.8b-unsloth/, 适合 4G 内存无 GPU 服务器。
 """
+import base64
+import json
 import os
+import urllib.request
 
-# 模型已在本地缓存, 加载时禁止联网检查
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
-_MODEL_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "models",
-    "qwen35-0.8b-unsloth",
-)
-_TEXT_GGUF = os.path.join(_MODEL_DIR, "Qwen3.5-0.8B-Q4_K_M.gguf")
-_MMPROJ = os.path.join(_MODEL_DIR, "mmproj-BF16.gguf")
-
-_llm = None
-
-
-def _load():
-    global _llm
-    if _llm is None:
-        from llama_cpp import Llama
-
-        text_gguf = os.environ.get("VISION_TEXT_GGUF", _TEXT_GGUF)
-        mmproj = os.environ.get("VISION_MMPROJ", _MMPROJ)
-        if not (os.path.exists(text_gguf) and os.path.exists(mmproj)):
-            raise FileNotFoundError(
-                f"缺少本地视觉模型: {text_gguf} / {mmproj} "
-                "(可用环境变量 VISION_TEXT_GGUF / VISION_MMPROJ 指定)"
-            )
-        _llm = Llama(
-            model_path=text_gguf,
-            mmproj=mmproj,
-            n_ctx=2048,
-            verbose=False,
-        )
-    return _llm
+_DEFAULT_URL = os.environ.get("VISION_BASE_URL", "http://127.0.0.1:8081")
 
 
 def analyze_image(image_path: str, prompt: str = "这张图片里有什么?用中文一句话描述。") -> str:
-    """分析一张本地图片, 返回文字描述。
+    """分析一张本地图片, 返回文字描述.
 
     Args:
         image_path: 本地图片路径 (jpg/png)。
         prompt: 提问, 默认中文描述图片内容。
     Returns:
         模型输出的文字。
+    Raises:
+        FileNotFoundError: 图片不存在。
+        RuntimeError: llama-server 未启动或调用失败。
     """
-    llm = _load()
-    out = llm.create_chat_completion(
-        messages=[
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"图片不存在: {image_path}")
+
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+
+    url = _DEFAULT_URL.rstrip("/") + "/v1/chat/completions"
+    payload = {
+        "model": "qwen",
+        "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": image_path}},
                     {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                 ],
             }
         ],
-        max_tokens=300,
-        temperature=0.3,
+        "max_tokens": 300,
+        "temperature": 0.2,
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
     )
-    return (out["choices"][0]["message"]["content"] or "").strip()
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.URLError:
+        # 服务未启动, 尝试自动拉起
+        from .vision_server import ensure_running, health
+
+        if not health():
+            ensure_running()
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            data = json.loads(resp.read().decode())
+    return (data["choices"][0]["message"].get("content") or "").strip()

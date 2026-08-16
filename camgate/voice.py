@@ -20,31 +20,24 @@ from .asr import transcribe_pcm16
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
-SYSTEM_PROMPT = """你是连接到大华摄像头的智能语音助手。用户通过摄像头麦克风对你喊话,你的回复会通过摄像头扬声器播报出来。
+# 单实例锁文件: 防止多个 voice 进程同时抢对讲通道
+_LOCK_PATH = os.path.join(MEDIA_DIR, "voice.lock")
+
+SYSTEM_PROMPT = """你是连接到大华摄像头的智能语音助手。用户通过摄像头麦克风对你喊话,你的回复会通过摄像头扬声器播报。
 你能: 转动云台、切换预置点、抓取画面并看内容。
-
 规则:
-1. 用简洁中文口语回复,一句话说清执行结果,不超过30字。
-2. 用户让移动/转向/看某方向 → 调 ptz_move; 让去预置点 → 调 preset; 想看画面/问看到什么 → 调 analyze_image。
-3. ptz_move 的 action 用 up/down/left/right 等, speed 用 5, seconds 用 0.5; 上下调节用 up/down。
-4. analyze_image 会抓图并用本地视觉模型返回画面描述。
-5. 听不清用户的话时,调 listen 再听一次。
-6. 不要编造结果,以工具返回为准。"""
+1. 用户让移动/转向/看某方向 → 必须调用工具 ptz_move; 去预置点 → 必须调用 preset; 想看画面/问看到什么 → 必须调用 analyze_image。
+2. 不要直接文字回答, 必须调用对应工具(除非是打招呼/闲聊)。
+3. ptz_move: action 用 up/down/left/right, speed 用 5, seconds 用 0.5。
+4. 拿到工具返回结果后, 用简洁中文口语一句话回复, 不超过30字, 不要编造。"""
 
+# 精简工具集: 只留本地模型稳定触发的工具, 工具越多推理越慢
 TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "camera_status",
-            "description": "查询摄像头在线状态",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "ptz_move",
-            "description": "控制云台向某个方向移动一段时间",
+            "description": "控制云台向某个方向移动一段时间。用户说转向/移动/看哪个方向时调用",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -63,16 +56,8 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "ptz_stop",
-            "description": "立即停止云台所有移动",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "preset",
-            "description": "调用云台预置点(转到预先存好的位置)",
+            "description": "调用云台预置点(转到预先存好的位置)。用户说去预置点/去某位置时调用",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -87,15 +72,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_image",
-            "description": "抓取当前画面并用本地视觉模型识别, 返回画面内容描述。用户问'看到什么/有没有人'时用",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "listen",
-            "description": "再录一次音并识别用户的话(没听清时用)",
+            "description": "抓取当前画面并用本地视觉模型识别, 返回画面内容描述。用户问'看到什么/有没有人'时调用",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -106,18 +83,29 @@ class VoiceAssistant:
     def __init__(self, cfg, cam):
         self.cfg = cfg
         self.cam = cam
-        self.base_url = cfg["ai"]["base_url"].rstrip("/")
-        self.api_key = cfg["ai"]["api_key"]
-        self.model = cfg["ai"]["chat_model"]
+        # 意图理解走本地 llama-server (OpenAI 兼容, 快且稳定), 可用 VISION_BASE_URL 覆盖
+        self.base_url = os.environ.get("VISION_BASE_URL", "http://127.0.0.1:8081/v1").rstrip("/")
+        self.api_key = ""
+        self.model = "qwen"
 
-    # ---------- 云 LLM ----------
+    # ---------- 本地 LLM (llama-server) ----------
     def _chat(self, messages):
+        from .vision_server import ensure_running, health
+
+        if not health():
+            ensure_running()
         url = self.base_url + "/chat/completions"
-        payload = {"model": self.model, "messages": messages, "tools": TOOLS, "tool_choice": "auto"}
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "tools": TOOLS,
+            "tool_choice": "auto",
+            "max_tokens": 80,
+        }
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode())
@@ -172,9 +160,28 @@ class VoiceAssistant:
 
 def main():
     cfg = load_config()
-    if not cfg["ai"]["api_key"]:
-        print("请先在 config.ini 设置 [ai] api_key(或用环境变量 AI_API_KEY)")
+    # 意图理解走本地 llama-server, 确认可用
+    from .vision_server import health, ensure_running
+
+    if not health():
+        print("正在启动本地视觉/对话服务 (llama-server)...")
+        ensure_running()
+    if not health():
+        print("[!] 本地 LLM 服务启动失败, 请检查 vendor/llama/llama-server 是否就绪")
         return
+
+    # 单实例锁: 已有 voice 进程在跑则退出(避免多进程抢对讲通道)
+    if os.path.exists(_LOCK_PATH):
+        try:
+            with open(_LOCK_PATH) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)  # 0 表示只检查进程是否存在
+            print(f"[!] 已有 voice 进程在运行 (PID {pid})。请先停止它再启动。")
+            return
+        except (ValueError, ProcessLookupError):
+            pass  # 锁文件残留(进程已死), 继续启动
+    with open(_LOCK_PATH, "w") as f:
+        f.write(str(os.getpid()))
 
     from .mcp_server import _get_cam
     from .camera import CameraError
@@ -196,7 +203,7 @@ def main():
         try:
             round_no += 1
             print(f"[{round_no}] 监听中...", flush=True)
-            pcm, rate, bit = cam.record_audio(6)
+            pcm, rate, bit = cam.record_audio(6, on_retry=lambda w: print(f"[!] 对讲通道被占用, 等待释放({int(w)}s)...", flush=True))
             text = transcribe_pcm16(pcm, rate)
             if not text:
                 continue
@@ -223,6 +230,11 @@ def main():
         except Exception as e:
             print(f"[!] {e}", flush=True)
             time.sleep(1)
+
+    try:
+        os.remove(_LOCK_PATH)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

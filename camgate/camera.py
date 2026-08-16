@@ -147,6 +147,15 @@ class Camera:
             self.loginID = 0
             self._online = False
 
+    def reboot(self):
+        """重启摄像头设备(用于清除对讲通道等卡死状态). 重启约需 30-60 秒. 返回是否成功."""
+        if not self.loginID:
+            raise CameraError("未登录")
+        if self.sdk.RebootDev(self.loginID):
+            self._online = False
+            return True
+        raise CameraError(f"重启失败: {self.sdk.GetLastErrorMessage()}")
+
     def cleanup(self):
         try:
             self.logout()
@@ -357,10 +366,13 @@ class Camera:
         return True
 
     # ---------- 麦克风采集 ----------
-    def record_audio(self, seconds=5.0):
+    def record_audio(self, seconds=5.0, on_retry=None):
         """采集摄像头麦克风音频, 返回 (pcm16_bytes, sample_rate, audio_bit).
         用 StartTalkByDataType 全双工对讲通道, 收到设备麦克风上行的裸 PCM 音频.
+        若对讲通道被占用(上次进程异常退出残留), 自动重试等待摄像头端释放, 最长约 2 分钟.
         """
+        import ctypes as _ct
+
         from NetSDK.SDK_Struct import (
             NET_IN_START_TALK_INFO,
             NET_OUT_START_TALK_INFO,
@@ -368,46 +380,80 @@ class Camera:
             C_ENUM,
         )
         from NetSDK.SDK_Callback import CB_FUNCTYPE
-        import ctypes as _ct
 
         if self.loginID == 0:
             raise CameraError("未登录")
 
         _TALK_CB = CB_FUNCTYPE(None, C_LLONG, _ct.POINTER(NET_AUDIO_DATA_CB_INFO), C_ENUM, C_LDWORD)
 
-        buffer = []
-        meta = {}
+        max_wait = 120.0  # 最长等待摄像头端释放对讲通道
+        waited = 0.0
+        attempts = 0  # 连续被占用的次数
 
-        @_TALK_CB
-        def _cb(lTalkHandle, pInfo, emAudioCode, dwUser):
-            if not pInfo:
-                return
-            info = pInfo.contents
-            if info.dwRawBufSize > 0 and info.pRawBuf:
-                raw = _ct.string_at(info.pRawBuf, info.dwRawBufSize)
-                buffer.append(raw)
-            meta.setdefault("rate", info.dwSampleRate)
-            meta.setdefault("bit", info.nAudioBit)
-            meta.setdefault("code", emAudioCode)
+        while True:
+            buffer = []
+            meta = {}
 
-        in_param = NET_IN_START_TALK_INFO()
-        in_param.dwSize = ctypes.sizeof(in_param)
-        in_param.pfAudioDataCallBackEx = _cb
-        in_param.dwUser = C_LDWORD(0)
+            @_TALK_CB
+            def _cb(lTalkHandle, pInfo, emAudioCode, dwUser):
+                if not pInfo:
+                    return
+                info = pInfo.contents
+                if info.dwRawBufSize > 0 and info.pRawBuf:
+                    raw = _ct.string_at(info.pRawBuf, info.dwRawBufSize)
+                    buffer.append(raw)
+                meta.setdefault("rate", info.dwSampleRate)
+                meta.setdefault("bit", info.nAudioBit)
+                meta.setdefault("code", emAudioCode)
 
-        out_param = NET_OUT_START_TALK_INFO()
-        out_param.dwSize = ctypes.sizeof(out_param)
+            in_param = NET_IN_START_TALK_INFO()
+            in_param.dwSize = ctypes.sizeof(in_param)
+            in_param.pfAudioDataCallBackEx = _cb
+            in_param.dwUser = C_LDWORD(0)
 
-        handle = self.sdk.StartTalkByDataType(self.loginID, in_param, out_param, 3000)
-        if not handle:
-            raise CameraError(f"开启麦克风采集失败: {self.sdk.GetLastErrorMessage()}")
+            out_param = NET_OUT_START_TALK_INFO()
+            out_param.dwSize = ctypes.sizeof(out_param)
 
-        try:
-            time.sleep(float(seconds))
-        finally:
-            self.sdk.StopTalkEx(handle)
+            handle = self.sdk.StartTalkByDataType(self.loginID, in_param, out_param, 3000)
+            if not handle:
+                err = self.sdk.GetLastErrorMessage()
+                if "talk has opened" in err:
+                    attempts += 1
+                    # 连续 3 次仍被占用 -> 询问是否重启摄像头
+                    if attempts >= 3:
+                        answer = input(
+                            f"对讲通道连续 {attempts} 次被占用, 是否重启摄像头? (y/n): "
+                        ).strip().lower()
+                        if answer in ("y", "yes"):
+                            print("正在重启摄像头, 请稍候...", flush=True)
+                            try:
+                                self.reboot()
+                            except Exception as e:
+                                # RebootDev 常返回 Protocol error 但设备实际已收到指令并重启
+                                if "Protocol error" in str(e):
+                                    print("[i] 设备已响应重启(协议错误属正常), 等待其重新上线...", flush=True)
+                                else:
+                                    print(f"[!] 重启指令发出失败: {e}", flush=True)
+                            time.sleep(20)
+                            waited = 0.0
+                            attempts = 0
+                            continue
+                    if waited >= max_wait:
+                        raise CameraError(f"开启麦克风采集失败: {err}")
+                    wait = min(15.0, max(5.0, waited / 3))
+                    if on_retry:
+                        on_retry(wait)
+                    time.sleep(wait)
+                    waited += wait
+                    continue
+                raise CameraError(f"开启麦克风采集失败: {err}")
 
-        if not buffer:
-            raise CameraError("未采集到音频数据(设备可能无麦克风或通道被占用)")
-        pcm = b"".join(buffer)
-        return pcm, meta.get("rate", 8000), meta.get("bit", 16)
+            try:
+                time.sleep(float(seconds))
+            finally:
+                self.sdk.StopTalkEx(handle)
+
+            if not buffer:
+                raise CameraError("未采集到音频数据(设备可能无麦克风或通道被占用)")
+            pcm = b"".join(buffer)
+            return pcm, meta.get("rate", 8000), meta.get("bit", 16)

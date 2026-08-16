@@ -45,6 +45,18 @@ snapshot_download('unsloth/Qwen3.5-0.8B-GGUF', local_dir='models/qwen35-0.8b-uns
 "
 ```
 
+**视觉服务(重要)**: `analyze_image` 依赖 llama.cpp 的 `llama-server`(原生支持 mmproj 视觉)。
+预编译二进制需手动放到 `vendor/llama/`(下载 llama.cpp 官方 release 的 Ubuntu x64 CPU 包并解压),
+或安装 `llama-server` 到 PATH。`analyze_image` 首次调用会自动拉起它,也可手动:
+
+```bash
+uv run camgate vision-server start    # 启动视觉服务 (127.0.0.1:8081)
+uv run camgate vision-server stop     # 停止
+```
+
+> 坑: llama-cpp-python 0.3.34 的 `mmproj` 参数实际不生效(视觉从未真正加载, 会严重幻觉),
+> 必须用 llama.cpp 原生 llama-server。
+
 > 国内网络可先 `export HF_ENDPOINT=https://hf-mirror.com`。也可以设 `VISION_TEXT_GGUF` / `VISION_MMPROJ` 环境变量指向自己的模型文件。
 
 ### 2. 安装
@@ -128,18 +140,19 @@ uv run camgate gateway   # 可选: 启动 HTTP 网关 (127.0.0.1:8080)
 
 ### 语音对话助手(对讲机模式)
 
-命令行启动后**一直监听**摄像头,识别到你说话就交给云 LLM 理解并控制摄像头,回复通过扬声器播报:
+命令行启动后**一直监听**摄像头,识别到你说话就交给 LLM 理解并控制摄像头,回复通过扬声器播报:
 
 ```bash
 uv run camgate voice
 ```
 
 ```
-你喊"往右转" → whisper 识别(本地) → 云 LLM(function calling) → ptz_move 执行 → 扬声器回应
+你喊"往右转" → whisper 识别(本地) → 本地 Qwen3.5-0.8B(function calling) → ptz_move 执行 → 扬声器回应
 ```
 
-- 意图理解用 `config.ini [ai]` 的 OpenAI 兼容接口(可填 `chat_model = auto` 自动选模型)。
-- `listen`(听)、`analyze_image`(本地看图)都在本地,只有 LLM 决策走云端。
+- **全本地**: 识别(whisper)、意图理解(function calling)、看图(Qwen3.5-0.8B)都在本地 llama-server,不依赖云 API,速度稳定(一轮约 14s,主要耗时在 6s 固定录音)。
+- 意图理解走 `llama-server` 的 OpenAI 兼容接口(默认 `http://127.0.0.1:8081/v1`),首次运行会自动拉起服务。
+- 实测: 本地 0.8B 对"转方向/预置点/看图"触发工具 10/10 成功,回复 <30 字简洁口语;云 API(auto 模型)工具越多越慢(11 工具 ~14s),已被本地替代。
 
 ## 弱服务器部署(4G 内存、无 GPU)
 
@@ -164,7 +177,8 @@ camgate/
     gateway.py     # HTTP 网关
     tts.py         # TTS 转 G711 音频
     asr.py         # 语音识别 (faster-whisper)
-    vision.py      # 本地视觉理解 (Qwen3.5-0.8B)
+    vision.py      # 本地视觉理解 (调用 llama-server OpenAI 兼容 API)
+    vision_server.py # llama-server 进程管理 (start/stop/status)
     mcp_server.py  # MCP server (核心)
     agent.py       # 可选: AI 交互助手
   scripts/

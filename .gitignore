@@ -7,6 +7,9 @@ media/
 # 本地模型文件(whisper/视觉 GGUF, 大体积不入库)
 models/
 
+# llama.cpp 预编译二进制(vendor 里, 大体积不入库)
+vendor/llama/
+
 # 会话记录
 session-*.json
 session-*.md

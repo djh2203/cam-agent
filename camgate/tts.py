@@ -135,26 +135,46 @@ def json_dumps(d):
 
 
 def text_to_g711a(text, cfg, out_path, codec="mulaw"):
-    """文本 -> 裸编码音频文件(alaw/mulaw). 返回 (文件路径, 时长秒)"""
+    """文本 -> 裸编码音频文件(alaw/mulaw). 返回 (文件路径, 时长秒).
+
+    带缓存: 相同文本+codec 的音频直接复用, 避免重复 TTS(尤其 voice 常用固定回复).
+    """
+    cache_dir = os.path.join(os.path.dirname(out_path), ".tts_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    import hashlib
+
+    voice = cfg["tts"].get("edge_voice", "zh-CN-XiaoxiaoNeural")
+    cache_key = hashlib.md5(f"{backend_key(cfg)}|{voice}|{codec}|{text}".encode()).hexdigest()[:16]
+    cache_file = os.path.join(cache_dir, f"{cache_key}.{codec}")
+
+    # 命中缓存直接返回
+    if os.path.exists(cache_file):
+        duration = os.path.getsize(cache_file) / 8000.0
+        return cache_file, duration
+
     backend = cfg["tts"].get("backend", "edge")
     tmp_mp3 = out_path + ".mp3"
 
     try:
         if backend == "edge":
-            _synth_edge(text, cfg["tts"].get("edge_voice", "zh-CN-XiaoxiaoNeural"), tmp_mp3)
+            _synth_edge(text, voice, tmp_mp3)
         elif backend == "openai":
             _synth_openai(text, cfg, tmp_mp3)
         else:
             raise RuntimeError(f"未知 TTS backend: {backend}")
 
         raw = _ffmpeg_to_raw_codec(tmp_mp3, 8000, codec)
-        with open(out_path, "wb") as f:
+        with open(cache_file, "wb") as f:
             f.write(raw)
         duration = len(raw) / 8000.0
-        return out_path, duration
+        return cache_file, duration
     finally:
         if os.path.exists(tmp_mp3):
             os.remove(tmp_mp3)
+
+
+def backend_key(cfg):
+    return cfg["tts"].get("backend", "edge")
 
 
 def beep_g711a(out_path, freq=880, seconds=0.3):

@@ -34,8 +34,12 @@ def transcribe_pcm16(pcm16: bytes, sample_rate: int = 8000, language: str = "zh"
         segments, _info = model.transcribe(
             path,
             language=language,
-            beam_size=5,
+            beam_size=1,  # 短指令 beam=1 足够, 比 5 快数倍
             vad_filter=True,
+            vad_parameters={
+                "threshold": 0.6,  # VAD 敏感度, 默认0.5; 设备底噪大, 略调高滤噪音但不过严
+                "min_silence_duration_ms": 500,
+            },
         )
         return "".join(seg.text for seg in segments).strip()
     except Exception:
