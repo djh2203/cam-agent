@@ -1,9 +1,8 @@
 [project]
-name = "camgate"
+name = "cam-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "netsdk",
     "edge-tts",
     "mcp>=2.0.0",
     "faster-whisper>=1.0.0",
@@ -24,9 +23,6 @@ dev = []
 
 [tool.uv]
 package = true
-
-[tool.uv.sources]
-netsdk = { path = "vendor/NetSDK-2.0.0.1-py3-none-linux_x86_64.whl" }
 
 [[tool.uv.index]]
 name = "pypi"

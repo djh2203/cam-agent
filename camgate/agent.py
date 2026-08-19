@@ -180,6 +180,20 @@ class GatewayClient:
     def speak(self, text):
         return self._post("/speak", {"text": text, "codec": "mulaw"})
 
+    def analyze(self, question=None):
+        """抓图 + 本地视觉分析画面"""
+        cap = self._post("/capture", {})
+        if not cap.get("ok"):
+            return cap
+        from .vision import analyze_image
+
+        path = cap["path"]
+        if question:
+            result = analyze_image(path, question)
+        else:
+            result = analyze_image(path)
+        return {"ok": True, "path": path, "result": result}
+
 
 class AIAgent:
     def __init__(self, cfg, gateway_base="http://127.0.0.1:8080"):

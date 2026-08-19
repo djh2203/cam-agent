@@ -80,9 +80,12 @@ TOOLS = [
 
 
 class VoiceAssistant:
-    def __init__(self, cfg, cam):
+    def __init__(self, cfg, client=None):
         self.cfg = cfg
-        self.cam = cam
+        # 通过 MCP client 连 mcp-dahua-camera 仓库调用设备能力
+        from .mcp_client import get_client
+
+        self.client = client if client is not None else get_client()
         # 意图理解走本地 llama-server (OpenAI 兼容, 快且稳定), 可用 VISION_BASE_URL 覆盖
         self.base_url = os.environ.get("VISION_BASE_URL", "http://127.0.0.1:8081/v1").rstrip("/")
         self.api_key = ""
@@ -110,16 +113,19 @@ class VoiceAssistant:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode())
 
-    # ---------- 工具执行(复用 mcp_server 的 handler) ----------
+    # ---------- 工具执行(通过 MCP client 调 mcp-dahua-camera) ----------
     def _run_tool(self, name, args):
-        from .mcp_server import HANDLERS
-
-        handler = HANDLERS.get(name)
-        if handler is None:
-            return {"error": f"未知工具 {name}"}
         print(f"  [tool] {name}{args}", flush=True)
         try:
-            return handler(args)
+            if name == "analyze_image":
+                # 组合工具: A 仓库 capture 抓图 + 本地视觉分析
+                cap = self.client.call("capture", {})
+                if not cap.get("ok"):
+                    return {"error": cap.get("error", "抓图失败")}
+                from .vision import analyze_image
+
+                return {"ok": True, "path": cap["path"], "result": analyze_image(cap["path"])}
+            return self.client.call(name, args)
         except Exception as e:
             return {"error": str(e)}
 
@@ -155,7 +161,7 @@ class VoiceAssistant:
 
         out = os.path.join(MEDIA_DIR, f"reply_{int(time.time()*1000)}.mulaw")
         path, _ = text_to_g711a(text, self.cfg, out, codec="mulaw")
-        self.cam.speak_file(path, codec="mulaw")
+        self.client.play_audio(path, codec="mulaw")
 
 
 def main():
@@ -183,11 +189,11 @@ def main():
     with open(_LOCK_PATH, "w") as f:
         f.write(str(os.getpid()))
 
-    from .mcp_server import _get_cam
-    from .camera import CameraError
+    # 通过 MCP client 连 mcp-dahua-camera
+    from .mcp_client import get_client
 
-    cam = _get_cam()
-    assistant = VoiceAssistant(cfg, cam)
+    client = get_client()
+    assistant = VoiceAssistant(cfg, client)
 
     print("=" * 50, flush=True)
     print("语音助手已启动, 一直监听摄像头麦克风...", flush=True)
@@ -203,7 +209,15 @@ def main():
         try:
             round_no += 1
             print(f"[{round_no}] 监听中...", flush=True)
-            pcm, rate, bit = cam.record_audio(6, on_retry=lambda w: print(f"[!] 对讲通道被占用, 等待释放({int(w)}s)...", flush=True))
+            # 通过 MCP 采集麦克风(返回 wav 文件路径)
+            import wave
+
+            rec = client.record_audio(6)
+            if not rec.get("ok"):
+                raise RuntimeError(rec.get("error", "录音失败"))
+            with wave.open(rec["path"], "rb") as w:
+                rate = w.getframerate()
+                pcm = w.readframes(w.getnframes())
             text = transcribe_pcm16(pcm, rate)
             if not text:
                 continue
@@ -221,7 +235,7 @@ def main():
                 assistant.speak(reply)
             except Exception as e:
                 print(f"[说] 播报失败: {e}", flush=True)
-        except CameraError as e:
+        except Exception as e:
             print(f"[!] {e}", flush=True)
             time.sleep(2)
         except KeyboardInterrupt:

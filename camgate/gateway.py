@@ -7,7 +7,6 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .camera import Camera, CameraError
 from .tts import text_to_g711a, beep_g711a
 
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
@@ -69,8 +68,6 @@ class GateHandler(BaseHTTPRequestHandler):
                 self._frame()
             else:
                 self._err("未找到路由", 404)
-        except CameraError as e:
-            self._err(e, 500)
         except Exception as e:
             self._err(f"内部错误: {e}", 500)
 
@@ -95,8 +92,6 @@ class GateHandler(BaseHTTPRequestHandler):
                 self._beep()
             else:
                 self._err("未找到路由", 404)
-        except CameraError as e:
-            self._err(e, 500)
         except Exception as e:
             self._err(f"内部错误: {e}", 500)
 
@@ -225,18 +220,3 @@ def run_gateway(camera, cfg, host="127.0.0.1", port=8080):
         print("[gateway] 正在退出...")
     finally:
         server.server_close()
-
-
-if __name__ == "__main__":
-    from .config import load_config
-
-    cfg = load_config()
-    cam = Camera(
-        cfg["camera"]["ip"],
-        cfg["camera"]["port"],
-        cfg["camera"]["username"],
-        cfg["camera"]["password"],
-        cfg["camera"]["channel"],
-    )
-    cam.login()
-    run_gateway(cam, cfg, cfg["server"]["host"], int(cfg["server"]["port"]))
