@@ -242,10 +242,11 @@ class AIAgent:
     def __init__(self, cfg, gateway_base="http://127.0.0.1:8080"):
         self.cfg = cfg
         self.gateway = GatewayClient(gateway_base)
-        self.base_url = cfg["ai"]["base_url"].rstrip("/")
-        self.api_key = cfg["ai"]["api_key"]
-        self.chat_model = cfg["ai"]["chat_model"]
-        self.vision_model = cfg["ai"]["vision_model"]
+        # 意图理解走本地 llama-server (和 voice.py 一致)
+        self.base_url = os.environ.get("VISION_BASE_URL", "http://127.0.0.1:8081/v1").rstrip("/")
+        self.api_key = ""
+        self.chat_model = "qwen"
+        self.vision_model = "qwen"
 
         self._tools = {t["function"]["name"]: getattr(self.gateway, t["function"]["name"]) for t in TOOLS}
 
@@ -259,10 +260,7 @@ class AIAgent:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode())
@@ -286,10 +284,7 @@ class AIAgent:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode())
