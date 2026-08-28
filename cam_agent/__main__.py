@@ -1,5 +1,5 @@
 # coding=utf-8
-"""camgate 命令行入口: python -m camgate {gateway|agent}"""
+"""cam-agent 命令行入口: python -m cam_agent {gateway|agent}"""
 import sys
 
 from .config import load_config
@@ -12,9 +12,9 @@ def cmd_gateway(args):
     cfg = load_config()
     cam = CameraFacade()
     if not cam.online:
-        print("[camgate] 无法连接摄像头(MCP server), 请检查 mcp-dahua-camera")
+        print("[cam-agent] 无法连接摄像头(MCP server), 请检查 mcp-dahua-camera")
         return
-    print(f"[camgate] 摄像头已连接: {cam.ip}")
+    print(f"[cam-agent] 摄像头已连接: {cam.ip}")
     host = cfg["server"]["host"]
     port = int(cfg["server"]["port"])
     try:
@@ -43,7 +43,7 @@ def cmd_vision_server(args):
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python -m camgate {gateway|agent|voice|vision-server}")
+        print("用法: python -m cam_agent {gateway|agent|voice|vision-server}")
         print("  gateway       启动 HTTP 网关(通过 MCP 调 mcp-dahua-camera)")
         print("  agent         启动 AI 交互助手(需设置 [ai] api_key)")
         print("  voice         启动语音对话助手(本地 LLM 意图理解 + 扬声器回应)")

@@ -61,16 +61,16 @@ snapshot_download('unsloth/Qwen3.5-0.8B-GGUF', local_dir='models/qwen35-0.8b-uns
 
 ```bash
 uv sync
-uv run camgate voice          # 语音对话助手
-uv run camgate gateway        # HTTP 网关 (0.0.0.0:8080)
-uv run camgate agent          # AI agent (走网关+云API)
-uv run camgate vision-server start   # 视觉服务
+uv run cam-agent voice          # 语音对话助手
+uv run cam-agent gateway        # HTTP 网关 (0.0.0.0:8080)
+uv run cam-agent agent          # AI agent (走网关+云API)
+uv run cam-agent vision-server start   # 视觉服务
 ```
 
 ## 目录结构
 
 ```
-camgate/
+cam_agent/
     voice.py         # 语音对话循环 (本地LLM意图理解 + 扬声器回应)
     asr.py           # 语音识别 (faster-whisper)
     vision.py        # 本地视觉 (调用 llama-server)
