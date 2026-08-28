@@ -113,6 +113,10 @@ class GateHandler(BaseHTTPRequestHandler):
             info["model"] = getattr(dev, "model", "")
             info["software_version"] = getattr(dev, "software_version", "")
             info["hardware_version"] = getattr(dev, "hardware_version", "")
+            info["smart_track_supported"] = getattr(dev, "smart_track_supported", False)
+            info["smart_track_enabled"] = getattr(dev, "smart_track_enabled", False)
+            info["motion_detect_enabled"] = getattr(dev, "motion_detect_enabled", False)
+            info["tracking_zoom"] = getattr(dev, "tracking_zoom", False)
         self._ok(**info)
 
     def _frame(self):

@@ -188,6 +188,10 @@ class CameraFacade:
                 "model": info.get("model", ""),
                 "software_version": info.get("software_version", ""),
                 "hardware_version": info.get("hardware_version", ""),
+                "smart_track_supported": info.get("smart_track_supported", False),
+                "smart_track_enabled": info.get("smart_track_enabled", False),
+                "motion_detect_enabled": info.get("motion_detect_enabled", False),
+                "tracking_zoom": info.get("tracking_zoom", False),
             })()
 
     def _safe_call(self, name, args=None):
