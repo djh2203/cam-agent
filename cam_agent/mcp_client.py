@@ -181,7 +181,14 @@ class CameraFacade:
             self.ip = info.get("ip")
             self.channel = info.get("channel_num", 0)
             self._online = True
-            self.device_info = type("DevInfo", (), {"nChanNum": info.get("channel_num", 1), "sSerialNumber": info.get("serial", "").encode(), "nDVRType": info.get("device_type", 0)})()
+            self.device_info = type("DevInfo", (), {
+                "nChanNum": info.get("channel_num", 1),
+                "sSerialNumber": info.get("serial", "").encode(),
+                "nDVRType": info.get("device_type", 0),
+                "model": info.get("model", ""),
+                "software_version": info.get("software_version", ""),
+                "hardware_version": info.get("hardware_version", ""),
+            })()
 
     def _safe_call(self, name, args=None):
         try:

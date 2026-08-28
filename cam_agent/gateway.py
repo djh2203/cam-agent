@@ -102,13 +102,18 @@ class GateHandler(BaseHTTPRequestHandler):
             self._err("未登录", 401)
             return
         dev = cam.device_info
-        self._ok(
-            ip=cam.ip,
-            channel=cam.channel,
-            channel_num=dev.nChanNum if dev else 0,
-            serial=dev.sSerialNumber.decode(errors="ignore") if dev else "",
-            device_type=dev.nDVRType if dev else 0,
-        )
+        info = {
+            "ip": cam.ip,
+            "channel": cam.channel,
+            "channel_num": dev.nChanNum if dev else 0,
+            "serial": dev.sSerialNumber.decode(errors="ignore") if dev else "",
+            "device_type": dev.nDVRType if dev else 0,
+        }
+        if dev:
+            info["model"] = getattr(dev, "model", "")
+            info["software_version"] = getattr(dev, "software_version", "")
+            info["hardware_version"] = getattr(dev, "hardware_version", "")
+        self._ok(**info)
 
     def _frame(self):
         frame = getattr(self.server, "last_frame", None)
