@@ -26,6 +26,8 @@ SYSTEM_PROMPT = """你是一个连接到大华(Dahua)网络摄像头的智能控
 3. 想了解当前看到什么, 先 /capture 再 /analyze, 或直接调 analyze。
 4. 播报语音时 text 用简洁中文口语, 一次不超过 60 字。
 5. 抓图/分析时如果画面太暗或角度不对, 可以调整云台后再看。
+6. **绝对不要编造摄像头 IP 地址或密码**。如果不知道当前连接的是哪台摄像头, 先调 list_cameras 检查, 或用 search_cameras 搜索局域网。
+7. 如果 list_cameras 返回空列表(没有摄像头), 提示用户先搜索并切换到一台摄像头, 不要自行编造 IP 调用 select_camera。
 """
 
 TOOLS = [
@@ -338,11 +340,31 @@ class AIAgent:
 
 def main():
     cfg = load_config()
-    if not cfg["ai"]["api_key"]:
-        print("请先在 config.ini 中设置 [ai] api_key (或用环境变量 AI_API_KEY)")
-        return
 
-    agent = AIAgent(cfg)
+    # 自动拉起 gateway
+    import subprocess, time, socket
+    gw_host, gw_port = cfg.get("server", {}).get("host", "127.0.0.1"), cfg.get("server", {}).get("port", 8080)
+    def _gw_alive():
+        try:
+            with socket.create_connection((gw_host, int(gw_port)), timeout=1):
+                return True
+        except Exception:
+            return False
+    if not _gw_alive():
+        print(f"正在启动 gateway ({gw_host}:{gw_port})...")
+        subprocess.Popen(
+            [sys.executable, "-m", "cam_agent", "gateway"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for _ in range(10):
+            time.sleep(0.5)
+            if _gw_alive():
+                print("gateway 已启动")
+                break
+        else:
+            print("gateway 启动超时, 部分功能可能不可用")
+
+    agent = AIAgent(cfg, gateway_base=f"http://{gw_host}:{gw_port}")
     print("=" * 50)
     print("AI 摄像头控制助手已就绪。输入指令, 例如:")
     print('  "摄像头往右转" / "现在看到什么" / "对摄像头说欢迎光临" / "去预置点1"')
