@@ -66,6 +66,10 @@ class GateHandler(BaseHTTPRequestHandler):
                 self._info()
             elif path == "/frame.jpg":
                 self._frame()
+            elif path == "/cameras":
+                self._list_cameras()
+            elif path == "/cameras/search":
+                self._search_devices()
             else:
                 self._err("未找到路由", 404)
         except Exception as e:
@@ -90,6 +94,8 @@ class GateHandler(BaseHTTPRequestHandler):
                 self._speak()
             elif path == "/beep":
                 self._beep()
+            elif path == "/cameras/select":
+                self._select_camera()
             else:
                 self._err("未找到路由", 404)
         except Exception as e:
@@ -206,6 +212,39 @@ class GateHandler(BaseHTTPRequestHandler):
         path, seconds = beep_g711a(out)
         self.camera.speak_file(path, codec="alaw")
         self._ok(message="提示音已播放", duration=seconds)
+
+    def _list_cameras(self):
+        r = self.camera.list_cameras()
+        if r.get("ok"):
+            self._ok(**r)
+        else:
+            self._err(r.get("error", "查询失败"))
+
+    def _search_devices(self):
+        timeout = int(urlparse(self.path).query.split("=")[1]) if "=" in urlparse(self.path).query else 8
+        r = self.camera.search_devices(timeout=timeout)
+        if r.get("ok"):
+            self._ok(**r)
+        else:
+            self._err(r.get("error", "搜索失败"))
+
+    def _select_camera(self):
+        data = self._read_json()
+        ip = data.get("ip")
+        if not ip:
+            self._err("缺少 ip")
+            return
+        r = self.camera.select_camera(
+            ip,
+            port=data.get("port"),
+            username=data.get("username"),
+            password=data.get("password"),
+            channel=data.get("channel"),
+        )
+        if r.get("ok"):
+            self._ok(**r)
+        else:
+            self._err(r.get("error", "切换失败"))
 
 
 def create_server(camera, cfg, host, port):

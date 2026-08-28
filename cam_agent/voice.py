@@ -23,16 +23,48 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 # 单实例锁文件: 防止多个 voice 进程同时抢对讲通道
 _LOCK_PATH = os.path.join(MEDIA_DIR, "voice.lock")
 
-SYSTEM_PROMPT = """你是连接到大华摄像头的智能语音助手。用户通过摄像头麦克风对你喊话,你的回复会通过摄像头扬声器播报。
-你能: 转动云台、切换预置点、抓取画面并看内容。
+SYSTEM_PROMPT = """你是连接到大华/Imou摄像头的智能语音助手。用户通过摄像头麦克风对你喊话,你的回复会通过摄像头扬声器播报。
+你能: 搜索设备、切换摄像头、转动云台、切换预置点、抓取画面并看内容。
 规则:
 1. 用户让移动/转向/看某方向 → 必须调用工具 ptz_move; 去预置点 → 必须调用 preset; 想看画面/问看到什么 → 必须调用 analyze_image。
-2. 不要直接文字回答, 必须调用对应工具(除非是打招呼/闲聊)。
-3. ptz_move: action 用 up/down/left/right, speed 用 5, seconds 用 0.5。
-4. 拿到工具返回结果后, 用简洁中文口语一句话回复, 不超过30字, 不要编造。"""
+2. 用户说搜索/找设备 → 调用 search_devices; 说切换到xxx/换一台 → 调用 select_camera; 说当前/有哪些 → 调用 list_cameras。
+3. 不要直接文字回答, 必须调用对应工具(除非是打招呼/闲聊)。
+4. ptz_move: action 用 up/down/left/right, speed 用 5, seconds 用 0.5。
+5. 拿到工具返回结果后, 用简洁中文口语一句话回复, 不超过30字, 不要编造。"""
 
 # 精简工具集: 只留本地模型稳定触发的工具, 工具越多推理越慢
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_devices",
+            "description": "局域网搜索摄像头。用户说搜索/找设备/有哪些摄像头时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_camera",
+            "description": "切换到指定IP的摄像头。用户说切换到xxx/换到xxx时调用",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ip": {"type": "string", "description": "摄像头IP地址"},
+                    "password": {"type": "string", "description": "密码(用户未提供则不传)"},
+                },
+                "required": ["ip"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_cameras",
+            "description": "查看当前已连接的摄像头列表。用户说当前/有哪些/切换了哪台时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -125,6 +157,14 @@ class VoiceAssistant:
                 from .vision import analyze_image
 
                 return {"ok": True, "path": cap["path"], "result": analyze_image(cap["path"])}
+            if name == "search_devices":
+                return self.client.search_devices(timeout=8)
+            if name == "select_camera":
+                ip = args.get("ip")
+                password = args.get("password")
+                return self.client.select_camera(ip, password=password)
+            if name == "list_cameras":
+                return self.client.list_cameras()
             return self.client.call(name, args)
         except Exception as e:
             return {"error": str(e)}

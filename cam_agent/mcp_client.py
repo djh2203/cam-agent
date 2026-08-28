@@ -142,6 +142,24 @@ class MCPCameraClient:
     def camera_info(self):
         return self.call("camera_info")
 
+    def search_devices(self, timeout=8):
+        return self.call("search_devices", {"timeout": timeout})
+
+    def select_camera(self, ip, port=None, username=None, password=None, channel=None):
+        args = {"ip": ip}
+        if port is not None:
+            args["port"] = port
+        if username is not None:
+            args["username"] = username
+        if password is not None:
+            args["password"] = password
+        if channel is not None:
+            args["channel"] = channel
+        return self.call("select_camera", args)
+
+    def list_cameras(self):
+        return self.call("list_cameras")
+
 
 _client = None
 
@@ -176,23 +194,41 @@ class CameraFacade:
         self.loginID = 1  # 模拟已登录
         self._online = True
         self.device_info = None
+        # 尝试获取当前摄像头信息(可能还没选)
         info = self._safe_call("camera_info", {})
         if info.get("ok"):
-            self.ip = info.get("ip")
-            self.channel = info.get("channel_num", 0)
-            self._online = True
-            self.device_info = type("DevInfo", (), {
-                "nChanNum": info.get("channel_num", 1),
-                "sSerialNumber": info.get("serial", "").encode(),
-                "nDVRType": info.get("device_type", 0),
-                "model": info.get("model", ""),
-                "software_version": info.get("software_version", ""),
-                "hardware_version": info.get("hardware_version", ""),
-                "smart_track_supported": info.get("smart_track_supported", False),
-                "smart_track_enabled": info.get("smart_track_enabled", False),
-                "motion_detect_enabled": info.get("motion_detect_enabled", False),
-                "tracking_zoom": info.get("tracking_zoom", False),
-            })()
+            self._init_from_info(info)
+
+    def _init_from_info(self, info):
+        """从 camera_info 结果初始化属性."""
+        self.ip = info.get("ip")
+        self.channel = info.get("channel_num", 0)
+        self._online = True
+        self.device_info = type("DevInfo", (), {
+            "nChanNum": info.get("channel_num", 1),
+            "sSerialNumber": info.get("serial", "").encode(),
+            "nDVRType": info.get("device_type", 0),
+            "model": info.get("model", ""),
+            "software_version": info.get("software_version", ""),
+            "hardware_version": info.get("hardware_version", ""),
+            "smart_track_supported": info.get("smart_track_supported", False),
+            "smart_track_enabled": info.get("smart_track_enabled", False),
+            "motion_detect_enabled": info.get("motion_detect_enabled", False),
+            "tracking_zoom": info.get("tracking_zoom", False),
+        })()
+
+    def select_camera(self, ip, port=None, username=None, password=None, channel=None):
+        """切换摄像头, 成功后重新初始化属性."""
+        r = self._client.select_camera(ip, port, username, password, channel)
+        if r.get("ok"):
+            self._init_from_info(r)
+        return r
+
+    def search_devices(self, timeout=8):
+        return self._client.search_devices(timeout)
+
+    def list_cameras(self):
+        return self._client.list_cameras()
 
     def _safe_call(self, name, args=None):
         try:

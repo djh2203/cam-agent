@@ -123,6 +123,37 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_cameras",
+            "description": "局域网搜索摄像头设备",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_camera",
+            "description": "切换到指定IP的摄像头",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ip": {"type": "string", "description": "摄像头IP地址"},
+                    "password": {"type": "string", "description": "密码"},
+                },
+                "required": ["ip"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_cameras",
+            "description": "查看当前已连接的摄像头列表",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -193,6 +224,18 @@ class GatewayClient:
         else:
             result = analyze_image(path)
         return {"ok": True, "path": path, "result": result}
+
+    def search_cameras(self):
+        return self._get("/cameras/search")
+
+    def select_camera(self, ip, password=None):
+        payload = {"ip": ip}
+        if password:
+            payload["password"] = password
+        return self._post("/cameras/select", payload)
+
+    def list_cameras(self):
+        return self._get("/cameras")
 
 
 class AIAgent:
