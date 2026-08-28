@@ -28,6 +28,12 @@ SYSTEM_PROMPT = """你是一个连接到大华(Dahua)网络摄像头的智能控
 5. 抓图/分析时如果画面太暗或角度不对, 可以调整云台后再看。
 6. **绝对不要编造摄像头 IP 地址或密码**。如果不知道当前连接的是哪台摄像头, 先调 list_cameras 检查, 或用 search_cameras 搜索局域网。
 7. 如果 list_cameras 返回空列表(没有摄像头), 提示用户先搜索并切换到一台摄像头, 不要自行编造 IP 调用 select_camera。
+8. 工具返回错误时, 根据错误信息修正参数重试。常见错误及修正:
+   - "请先选择摄像头" → 调 list_cameras 检查, 或提示用户切换摄像头
+   - "未找到预置点" → 调 camera_info 查看有多少预置点, 用有效编号重试
+   - "参数错误" → 检查参数格式, 用正确类型重试
+   - JSON parse 错误 → 确保 arguments 是合法 JSON 字符串
+   不要放弃, 至少重试 2 次再向用户报错。
 """
 
 TOOLS = [
@@ -294,11 +300,11 @@ class AIAgent:
 
     # ---------- 工具执行 ----------
     def _call_tool(self, name, args):
-        print(f"  [tool] {name}{args}")
+        print(f"  [tool] {name}{args}", flush=True)
         if name == "analyze":
             cap = self.gateway.capture()
             if not cap.get("ok"):
-                return json.dumps({"error": cap.get("error")}, ensure_ascii=False)
+                return json.dumps({"error": f"抓图失败: {cap.get('error', '未知错误')}. 请先 list_cameras 检查是否有摄像头连接。"}, ensure_ascii=False)
             frame = self.gateway.frame()
             result = self._vision(frame, args.get("question", ""))
             return result
@@ -307,12 +313,15 @@ class AIAgent:
             return json.dumps({"error": f"未知工具 {name}"}, ensure_ascii=False)
         try:
             result = fn(**args)
+        except TypeError as e:
+            # 参数缺失或类型错误
+            result = {"error": f"参数错误: {e}. 请检查工具定义中的参数要求。"}
         except Exception as e:
             result = {"error": str(e)}
         return json.dumps(result, ensure_ascii=False)
 
     # ---------- 主循环 ----------
-    def run(self, user_input, max_steps=10):
+    def run(self, user_input, max_steps=15):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         messages.append({"role": "user", "content": user_input})
 
@@ -343,7 +352,8 @@ def main():
 
     # 自动拉起 gateway
     import subprocess, time, socket
-    gw_host, gw_port = cfg.get("server", {}).get("host", "127.0.0.1"), cfg.get("server", {}).get("port", 8080)
+    gw_host = cfg.get("server", "host", fallback="127.0.0.1")
+    gw_port = cfg.get("server", "port", fallback="8080")
     def _gw_alive():
         try:
             with socket.create_connection((gw_host, int(gw_port)), timeout=1):
