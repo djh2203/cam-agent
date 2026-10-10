@@ -1,8 +1,7 @@
 # coding=utf-8
-"""HTTP 网关: 让 AI(或任何客户端)通过 REST 接口控制摄像头"""
+"""HTTP 网关: 让外部客户端通过 REST 接口控制摄像头(内部 voice/agent 不走这里)"""
 import json
 import os
-import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -16,11 +15,6 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 def _json(body, status=200):
     data = json.dumps(body, ensure_ascii=False).encode()
     return (status, {"Content-Type": "application/json; charset=utf-8"}, data)
-
-
-def _text(body, status=200, ctype="text/plain; charset=utf-8"):
-    data = body.encode()
-    return (status, {"Content-Type": ctype}, data)
 
 
 class GateHandler(BaseHTTPRequestHandler):
@@ -78,11 +72,7 @@ class GateHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         try:
-            if path == "/login":
-                self._login()
-            elif path == "/logout":
-                self._logout()
-            elif path == "/ptz":
+            if path == "/ptz":
                 self._ptz()
             elif path == "/ptz/stop":
                 self._ptz_stop()
@@ -133,27 +123,6 @@ class GateHandler(BaseHTTPRequestHandler):
         self._respond(
             (200, {"Content-Type": "image/jpeg"}, frame)
         )
-
-    def _login(self):
-        data = self._read_json()
-        ip = data.get("ip") or self.camera.ip
-        port = data.get("port") or self.camera.port
-        user = data.get("username") or self.camera.username
-        pwd = data.get("password") or self.camera.password
-        if self.camera.loginID:
-            self.camera.logout()
-        self.camera.ip = ip
-        self.camera.port = int(port)
-        self.camera.username = user
-        self.camera.password = pwd
-        if self.camera.login():
-            self._ok(message="登录成功")
-        else:
-            self._err("登录失败", 401)
-
-    def _logout(self):
-        self.camera.logout()
-        self._ok(message="已登出")
 
     def _ptz(self):
         data = self._read_json()
@@ -221,7 +190,7 @@ class GateHandler(BaseHTTPRequestHandler):
             self._err(r.get("error", "查询失败"))
 
     def _search_devices(self):
-        timeout = int(urlparse(self.path).query.split("=")[1]) if "=" in urlparse(self.path).query else 8
+        timeout = int(parse_qs(urlparse(self.path).query).get("timeout", [8])[0])
         r = self.camera.search_devices(timeout=timeout)
         if r.get("ok"):
             self._ok(**r)

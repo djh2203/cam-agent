@@ -1,18 +1,14 @@
 # coding=utf-8
 """语音对话助手: 命令行启动后一直监听摄像头麦克风,
-识别到说话 -> 云 LLM 理解意图并 function calling 控制云台/看图 -> 扬声器播报回复.
+识别到说话 -> 本地 LLM 理解意图并 function calling 控制云台/看图 -> 扬声器播报回复.
 
-用法: uv run camgate voice
-依赖 config.ini 的 [ai] 段(OpenAI 兼容 base_url / api_key / chat_model)。
+用法: uv run cam-agent voice
+意图理解走本地 llama-server(VISION_BASE_URL), 不依赖 config.ini 的 [ai] 段。
 """
 import json
 import os
-import sys
 import time
-import urllib.error
 import urllib.request
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .config import load_config
 from .asr import transcribe_pcm16
@@ -275,15 +271,12 @@ def main():
                 assistant.speak(reply)
             except Exception as e:
                 print(f"[说] 播报失败: {e}", flush=True)
-        except Exception as e:
-            print(f"[!] {e}", flush=True)
-            time.sleep(2)
         except KeyboardInterrupt:
             print("\n已退出")
             break
         except Exception as e:
             print(f"[!] {e}", flush=True)
-            time.sleep(1)
+            time.sleep(2)
 
     try:
         os.remove(_LOCK_PATH)

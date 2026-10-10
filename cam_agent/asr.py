@@ -51,7 +51,6 @@ def transcribe_pcm16(pcm16: bytes, sample_rate: int = 8000, language: str = "zh"
 
 def _write_wav(path, pcm16: bytes, sample_rate: int):
     """写 16bit PCM 单声道 wav"""
-    import struct
     import wave
 
     with wave.open(path, "wb") as w:

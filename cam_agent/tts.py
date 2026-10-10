@@ -1,9 +1,9 @@
 # coding=utf-8
 """TTS 文本转语音, 最终产出 G711A 裸音频文件(供对讲下发到摄像头扬声器)"""
+import hashlib
+import json
 import os
 import subprocess
-import tempfile
-import time
 import urllib.request
 
 try:
@@ -51,20 +51,6 @@ def pcm16_to_g711a(pcm16: bytes) -> bytes:
     return bytes(table[s + 32768] for s in samples)
 
 
-def _ffmpeg_to_pcm(mp3_path, sample_rate=8000):
-    """mp3 -> 16bit PCM mono raw, 返回字节"""
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-i", mp3_path,
-        "-ar", str(sample_rate), "-ac", "1",
-        "-f", "s16le", "-",
-    ]
-    proc = subprocess.run(cmd, capture_output=True, timeout=120)
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg 转换失败: {proc.stderr.decode(errors='ignore')}")
-    return proc.stdout
-
-
 def _ffmpeg_to_raw_codec(mp3_path, sample_rate, codec):
     """mp3 -> 指定裸编码(alaw/mulaw) mono raw, 返回字节"""
     cmd = [
@@ -83,26 +69,8 @@ def _synth_edge(text, voice, out_path):
     if edge_tts is None:
         raise RuntimeError("未安装 edge-tts")
     import asyncio
-    import threading
 
-    async def _run():
-        comm = edge_tts.Communicate(text, voice)
-        await comm.save(out_path)
-
-    result = {}
-
-    def _worker():
-        try:
-            asyncio.run(_run())
-            result["ok"] = True
-        except Exception as e:
-            result["error"] = e
-
-    t = threading.Thread(target=_worker)
-    t.start()
-    t.join()
-    if "error" in result:
-        raise result["error"]
+    asyncio.run(edge_tts.Communicate(text, voice).save(out_path))
 
 
 def _synth_openai(text, cfg, out_path):
@@ -116,7 +84,7 @@ def _synth_openai(text, cfg, out_path):
     data = urllib.request.urlopen(
         urllib.request.Request(
             url,
-            data=json_dumps(payload).encode(),
+            data=json.dumps(payload).encode(),
             headers={
                 "Content-Type": "application/json",
                 "Authorization": "Bearer " + cfg["ai"].get("api_key", ""),
@@ -128,12 +96,6 @@ def _synth_openai(text, cfg, out_path):
         f.write(data)
 
 
-def json_dumps(d):
-    import json
-
-    return json.dumps(d)
-
-
 def text_to_g711a(text, cfg, out_path, codec="mulaw"):
     """文本 -> 裸编码音频文件(alaw/mulaw). 返回 (文件路径, 时长秒).
 
@@ -141,10 +103,10 @@ def text_to_g711a(text, cfg, out_path, codec="mulaw"):
     """
     cache_dir = os.path.join(os.path.dirname(out_path), ".tts_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    import hashlib
 
     voice = cfg["tts"].get("edge_voice", "zh-CN-XiaoxiaoNeural")
-    cache_key = hashlib.md5(f"{backend_key(cfg)}|{voice}|{codec}|{text}".encode()).hexdigest()[:16]
+    backend = cfg["tts"].get("backend", "edge")
+    cache_key = hashlib.md5(f"{backend}|{voice}|{codec}|{text}".encode()).hexdigest()[:16]
     cache_file = os.path.join(cache_dir, f"{cache_key}.{codec}")
 
     # 命中缓存直接返回
@@ -152,7 +114,6 @@ def text_to_g711a(text, cfg, out_path, codec="mulaw"):
         duration = os.path.getsize(cache_file) / 8000.0
         return cache_file, duration
 
-    backend = cfg["tts"].get("backend", "edge")
     tmp_mp3 = out_path + ".mp3"
 
     try:
@@ -171,10 +132,6 @@ def text_to_g711a(text, cfg, out_path, codec="mulaw"):
     finally:
         if os.path.exists(tmp_mp3):
             os.remove(tmp_mp3)
-
-
-def backend_key(cfg):
-    return cfg["tts"].get("backend", "edge")
 
 
 def beep_g711a(out_path, freq=880, seconds=0.3):

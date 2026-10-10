@@ -13,8 +13,6 @@ import asyncio
 import json
 import os
 import threading
-import urllib.parse
-from functools import partial
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -175,24 +173,20 @@ def get_client():
 class CameraFacade:
     """兼容旧代码(Camera 对象)接口的门面: 内部全部通过 MCP client 调 mcp-dahua-camera.
 
-    提供 gateway.py / __main__.py 期望的属性和方法:
-      ip/port/username/password/channel, online, loginID, device_info,
-      login/logout/capture/ptz_move/ptz_stop/ptz_preset/speak_file/cleanup.
-    注意: login/logout/device_info 是模拟的(A 仓库为常驻进程, 由 MCP server 管理登录),
-    其余真实调用走 MCP 协议。
+    属性: ip/channel/online/loginID/device_info; 方法: select_camera/search_devices/
+    list_cameras/capture/ptz_move/ptz_stop/ptz_preset/speak_file/cleanup。
+    未选中摄像头时 online=False、loginID=0(MCP server 是常驻进程, 自己不管理登录)。
     """
 
     def __init__(self, client=None):
-        from .mcp_client import get_client
-
         self._client = client if client is not None else get_client()
         self.ip = None
         self.port = None
         self.username = None
         self.password = None
         self.channel = 0
-        self.loginID = 1  # 模拟已登录
-        self._online = True
+        self.loginID = 0  # 未选摄像头即未登录, 由 _init_from_info 置 1
+        self._online = False
         self.device_info = None
         # 尝试获取当前摄像头信息(可能还没选)
         info = self._safe_call("camera_info", {})
@@ -203,6 +197,7 @@ class CameraFacade:
         """从 camera_info 结果初始化属性."""
         self.ip = info.get("ip")
         self.channel = info.get("channel_num", 0)
+        self.loginID = 1
         self._online = True
         self.device_info = type("DevInfo", (), {
             "nChanNum": info.get("channel_num", 1),
@@ -237,13 +232,6 @@ class CameraFacade:
             return {"ok": False, "error": str(e)}
 
     # ---------- Camera 兼容接口 ----------
-    def login(self):
-        return self._online
-
-    def logout(self):
-        self._online = False
-        return True
-
     def cleanup(self):
         pass
 

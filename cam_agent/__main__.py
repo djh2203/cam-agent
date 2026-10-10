@@ -11,10 +11,8 @@ def cmd_gateway(args):
 
     cfg = load_config()
     cam = CameraFacade()
-    if not cam.online:
-        print("[cam-agent] 无法连接摄像头(MCP server), 请检查 mcp-dahua-camera")
-        return
-    print(f"[cam-agent] 摄像头已连接: {cam.ip}")
+    # MCP server 起不来时 CameraFacade() 已抛异常; 这里只报告是否已选中摄像头
+    print(f"[cam-agent] 摄像头: {cam.ip or '未选择(用 POST /cameras/select 指定 IP)'}")
     host = cfg["server"]["host"]
     port = int(cfg["server"]["port"])
     try:

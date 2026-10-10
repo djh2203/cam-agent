@@ -94,17 +94,6 @@ def ensure_running(port=DEFAULT_PORT, wait=30):
 
 def stop(port=DEFAULT_PORT):
     """停止占用指定端口的 llama-server."""
-    import signal
-
-    try:
-        with urllib.request.urlopen(_base_url(port) + "/props", timeout=3) as r:
-            import json
-
-            props = json.loads(r.read().decode())
-        pid = props.get("total_slots")
-        return
-    except Exception:
-        pass
     os.system(f"fuser -k {port}/tcp 2>/dev/null || true")
 
 

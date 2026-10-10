@@ -20,8 +20,8 @@
 ## 功能
 
 - **语音对话助手** (`voice`): 一直监听麦克风, 你说"往右转"就转、问"看到什么"就描述, 扬声器回应
-- **HTTP 网关** (`gateway`): REST 接口控制摄像头(供 agent 或外部客户端)
-- **AI agent** (`agent`): 通过云 API function calling 指挥摄像头
+- **HTTP 网关** (`gateway`): REST 接口控制摄像头(供外部客户端;`agent`/`voice` 不经过它)
+- **AI agent** (`agent`): 命令行交互,本地 llama-server function calling 指挥摄像头
 - **本地视觉服务** (`vision-server`): llama-server 进程管理(看图用)
 - **多摄像头管理**: 搜索局域网设备、切换摄像头、查看已连接列表
 
@@ -36,10 +36,10 @@
 ### 2. 配置
 
 ```bash
-cp config.example.ini config.ini   # 填 [ai] 的 api_key / base_url
+cp config.example.ini config.ini   # [ai] 段只有 TTS backend=openai 时才需要填
 ```
 
-摄像头凭据在 **mcp-dahua-camera** 的 config.ini 配置(默认凭据),运行时通过搜索/切换选择要控制的摄像头。
+摄像头凭据在 **mcp-dahua-camera** 的 config.ini 配置(新设备的默认凭据),已连过的设备凭据自动存在该仓库的 `cameras.json`(gitignored)。运行时通过搜索/切换选择要控制的摄像头。
 
 ### 3. 本地模型(语音识别 + 视觉)
 
@@ -63,8 +63,8 @@ snapshot_download('unsloth/Qwen3.5-0.8B-GGUF', local_dir='models/qwen35-0.8b-uns
 ```bash
 uv sync
 uv run cam-agent voice          # 语音对话助手
-uv run cam-agent gateway        # HTTP 网关 (0.0.0.0:8080)
-uv run cam-agent agent          # AI agent (走网关+云API)
+uv run cam-agent gateway        # HTTP 网关 (127.0.0.1:8080, [server] 段可改)
+uv run cam-agent agent          # AI agent (本地 llama-server function calling)
 uv run cam-agent vision-server start   # 视觉服务
 ```
 
@@ -98,8 +98,10 @@ cam_agent/
     tts.py           # 文字转语音 (edge-tts, 带缓存)
     mcp_client.py    # MCP client (连 mcp-dahua-camera, 支持多摄像头)
     gateway.py       # HTTP 网关 (走 MCP client)
-    agent.py         # AI agent (走网关 + 云 API function calling)
+    agent.py         # AI agent (命令行, 本地 llama-server function calling)
     config.py        # 配置加载
+tests/
+    test_smoke.py    # 无硬件自检(facade 状态如实 / vision-server stop / agent 自动拉起 gateway)
 ```
 
 ## 4G 内存部署
