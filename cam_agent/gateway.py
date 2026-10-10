@@ -6,7 +6,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .tts import text_to_g711a, beep_g711a
+from .tts import text_to_g711a, beep
 
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -177,9 +177,9 @@ class GateHandler(BaseHTTPRequestHandler):
         self._ok(text=text, codec=codec, duration=round(duration, 2), message="已播放")
 
     def _beep(self):
-        out = os.path.join(MEDIA_DIR, f"beep_{int(time.time()*1000)}.g711a")
-        path, seconds = beep_g711a(out)
-        self.camera.speak_file(path, codec="alaw")
+        out = os.path.join(MEDIA_DIR, f"beep_{int(time.time()*1000)}.mulaw")
+        path, seconds = beep(out)
+        self.camera.speak_file(path, codec="mulaw")
         self._ok(message="提示音已播放", duration=seconds)
 
     def _list_cameras(self):

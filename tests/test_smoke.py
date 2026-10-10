@@ -68,8 +68,40 @@ def test_facade_does_not_lie_about_state():
     assert cam.online is True and cam.loginID == 1 and cam.ip == "10.0.0.9", "选了摄像头却没置在线"
 
 
+def test_tts_output_is_16k():
+    """TTS 产出的采样率必须真的等于 TTS_RATE。
+
+    设备按 16kHz 消费音频: 产出和声明不一致, 扬声器就等于只收到一半数据量 -> 卡顿/变速。
+    用 ffmpeg 造正弦, 不依赖网络。
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    from cam_agent import tts
+
+    assert tts.TTS_RATE == 16000, "摄像头扬声器按 16kHz 消费, 改了要同步 camera.py 的 speak_file"
+    if not shutil.which("ffmpeg"):
+        return  # ffmpeg 是运行时依赖, 没装就跳过
+
+    with tempfile.TemporaryDirectory() as d:
+        wav = os.path.join(d, "sine.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+             "-i", "sine=frequency=440:duration=1:sample_rate=48000", "-ac", "1", wav],
+            check=True, capture_output=True,
+        )
+        raw = tts._ffmpeg_to_raw_codec(wav, tts.TTS_RATE, "mulaw")
+        secs = len(raw) / tts.TTS_RATE
+        assert 0.9 < secs < 1.1, f"1 秒音频产出 {secs:.2f}s -> 采样率不对(TTS_RATE={tts.TTS_RATE})"
+
+        beep_path, _ = tts.beep(os.path.join(d, "beep.mulaw"), seconds=0.3)
+        assert 0.25 < os.path.getsize(beep_path) / tts.TTS_RATE < 0.35, "提示音时长不对"
+
+
 if __name__ == "__main__":
     test_agent_has_sys()
     test_vision_server_stop_kills_online_server()
     test_facade_does_not_lie_about_state()
+    test_tts_output_is_16k()
     print("ok")

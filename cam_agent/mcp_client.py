@@ -131,8 +131,8 @@ class MCPCameraClient:
     def record_audio(self, seconds=5):
         return self.call("record_audio", {"seconds": seconds})
 
-    def play_audio(self, path, codec="mulaw"):
-        return self.call("play_audio", {"path": path, "codec": codec})
+    def play_audio(self, path, codec="mulaw", sample_rate=16000):
+        return self.call("play_audio", {"path": path, "codec": codec, "sample_rate": sample_rate})
 
     def camera_status(self):
         return self.call("camera_status")
@@ -259,7 +259,10 @@ class CameraFacade:
         if not r.get("ok"):
             raise RuntimeError(r.get("error", "预置点操作失败"))
 
-    def speak_file(self, g711a_path, sample_rate=8000, audio_bit=8, codec="mulaw"):
-        r = self._safe_call("play_audio", {"path": g711a_path, "codec": codec})
+    def speak_file(self, g711a_path, sample_rate=16000, audio_bit=8, codec="mulaw"):
+        r = self._safe_call(
+            "play_audio",
+            {"path": g711a_path, "codec": codec, "sample_rate": sample_rate},
+        )
         if not r.get("ok"):
             raise RuntimeError(r.get("error", "播放失败"))

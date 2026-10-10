@@ -1,5 +1,5 @@
 # coding=utf-8
-"""TTS 文本转语音, 最终产出 G711A 裸音频文件(供对讲下发到摄像头扬声器)"""
+"""TTS 文本转语音, 最终产出 G.711 裸音频文件(16kHz, 供对讲下发到摄像头扬声器)"""
 import hashlib
 import json
 import os
@@ -11,44 +11,9 @@ try:
 except ImportError:
     edge_tts = None
 
-A_LAW_LOOKUP = None
-
-
-def _build_alaw_table():
-    """G.711 A-law 编码表 (16bit PCM -> 8bit A-law)"""
-    global A_LAW_LOOKUP
-    if A_LAW_LOOKUP is not None:
-        return A_LAW_LOOKUP
-    table = []
-    for i in range(-32768, 32768):
-        pcm = i
-        sign = (pcm >> 8) & 0x80
-        if sign:
-            pcm = -pcm
-        if pcm > 32635:
-            pcm = 32635
-        pcm = (pcm << 2) + 8
-        if pcm & 0x4000:
-            pcm ^= 0x4000
-        seg = 0
-        while (pcm & 0x2000) == 0 and seg < 7:
-            pcm <<= 1
-            seg += 1
-        alaw = (seg << 4) | ((pcm >> 8) & 0x0F)
-        alaw ^= 0x55 if sign else 0xD5
-        table.append(alaw & 0xFF)
-    A_LAW_LOOKUP = table
-    return table
-
-
-def pcm16_to_g711a(pcm16: bytes) -> bytes:
-    """16bit PCM mono -> G711A bytes (每样本 1 字节)"""
-    table = _build_alaw_table()
-    import struct
-
-    count = len(pcm16) // 2
-    samples = struct.unpack("<%dh" % count, pcm16[: count * 2])
-    return bytes(table[s + 32768] for s in samples)
+# 摄像头扬声器按 16kHz 消费音频(实测: 喂 8kHz 会被当 16kHz 播 -> 只有一半数据量 -> 卡顿),
+# 所以 TTS 直接产出 16kHz G.711, 并如实声明采样率。改这里必须同步 camera.py 的 speak_file。
+TTS_RATE = 16000
 
 
 def _ffmpeg_to_raw_codec(mp3_path, sample_rate, codec):
@@ -106,12 +71,14 @@ def text_to_g711a(text, cfg, out_path, codec="mulaw"):
 
     voice = cfg["tts"].get("edge_voice", "zh-CN-XiaoxiaoNeural")
     backend = cfg["tts"].get("backend", "edge")
-    cache_key = hashlib.md5(f"{backend}|{voice}|{codec}|{text}".encode()).hexdigest()[:16]
+    cache_key = hashlib.md5(
+        f"{backend}|{voice}|{codec}|{TTS_RATE}|{text}".encode()
+    ).hexdigest()[:16]
     cache_file = os.path.join(cache_dir, f"{cache_key}.{codec}")
 
     # 命中缓存直接返回
     if os.path.exists(cache_file):
-        duration = os.path.getsize(cache_file) / 8000.0
+        duration = os.path.getsize(cache_file) / TTS_RATE
         return cache_file, duration
 
     tmp_mp3 = out_path + ".mp3"
@@ -124,25 +91,24 @@ def text_to_g711a(text, cfg, out_path, codec="mulaw"):
         else:
             raise RuntimeError(f"未知 TTS backend: {backend}")
 
-        raw = _ffmpeg_to_raw_codec(tmp_mp3, 8000, codec)
+        raw = _ffmpeg_to_raw_codec(tmp_mp3, TTS_RATE, codec)
         with open(cache_file, "wb") as f:
             f.write(raw)
-        duration = len(raw) / 8000.0
+        duration = len(raw) / TTS_RATE
         return cache_file, duration
     finally:
         if os.path.exists(tmp_mp3):
             os.remove(tmp_mp3)
 
 
-def beep_g711a(out_path, freq=880, seconds=0.3):
-    """生成一段提示音(G711A), 用于测试扬声器"""
-    import math
-
-    pcm = bytearray()
-    for i in range(int(8000 * seconds)):
-        val = int(3000 * math.sin(2 * math.pi * freq * i / 8000))
-        pcm += int(val).to_bytes(2, "little", signed=True)
-    g711a = pcm16_to_g711a(bytes(pcm))
-    with open(out_path, "wb") as f:
-        f.write(g711a)
+def beep(out_path, freq=880, seconds=0.3, codec="mulaw", rate=TTS_RATE):
+    """生成一段提示音(G.711 裸音频), 用于测试摄像头扬声器"""
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={seconds}:sample_rate={rate}",
+        "-ac", "1", "-ar", str(rate), "-f", codec, out_path,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, timeout=30)
+    if proc.returncode != 0:
+        raise RuntimeError(f"生成提示音失败: {proc.stderr.decode(errors='ignore')}")
     return out_path, seconds

@@ -26,7 +26,7 @@ uv run cam-agent vision-server start|stop|status [port]   # llama-server 生命�
 
 - 入口在 `cam_agent/__main__.py`;包目录叫 `cam_agent`,pyproject 名字是 `cam-agent`。
 - `voice`:本地 llama-server 意图理解,function calling 精简为 6 工具(search_devices/select_camera/list_cameras/ptz_move/preset/analyze_image),固定录 6 秒。`agent`:11 工具,走 gateway REST + 同一个本地 llama-server。**两者都不读 [ai]**,`[ai]` 只在 `[tts] backend = openai` 时用。
-- 测试:`python3 tests/test_smoke.py`(无硬件自检:facade 状态如实 + `vision-server stop` 真停 + agent 自动拉起 gateway 用得到的 `sys` 已导入)。设备行为仍需真机跑 `voice`/`gateway` 冒烟。
+- 测试:`python3 tests/test_smoke.py`(无硬件自检:facade 状态如实 + `vision-server stop` 真停 + agent 自动拉起 gateway 用得到的 `sys` 已导入 + TTS 采样率真的是 16kHz)。设备行为仍需真机跑 `voice`/`gateway` 冒烟。
 
 ## gateway 路由(外部客户端)
 
@@ -49,6 +49,8 @@ uv run cam-agent vision-server start|stop|status [port]   # llama-server 生命�
 - 对讲通道被占会重试,`record_audio` 最长重试 120 秒——和 `MCPCameraClient.call()` 的 120s 超时相等,极端情况下客户端会先抛 `TimeoutError` 而不是干净的错误信息。要调就一起调。
 - 该分支里的"是否重启摄像头"询问只在终端(`sys.stdin.isatty()`)才弹;经 MCP stdio 调用时 stdin 是协议管道,弹了会挂起并污染协议,所以被挡掉了。
 - 静音抑制下大声短促喊话效果最好;whisper `beam_size=1` + `vad_filter` 已调好,别乱动。
+- **扬声器链路固定 16kHz**:摄像头按 16kHz 消费音频,`tts.TTS_RATE` 产出 16kHz G.711(mulaw),`play_audio` 默认 `sample_rate=16000`。改这个常量必须同步 mcp-dahua-camera 的 `camera.py::speak_file` 和 `play_audio` 工具,否则设备只收到一半数据量 → 播放卡顿/变速(缓存 key 里带了采样率,改完老的 8kHz 缓存不会被复用)。
+- 播放编码只能用 `mulaw`;实测 `alaw` 与"不加音频头"在该设备上都是静音。
 - `analyze_image` = A 仓库 `capture` + 本地视觉;大华/IMOU 都能用,IMOU 麦克风采样率 16kHz。
 
 ## 配置(本仓库 config.ini,gitignored)
