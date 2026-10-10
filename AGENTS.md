@@ -45,12 +45,13 @@ uv run cam-agent vision-server start|stop|status [port]   # llama-server 生命�
 
 ## 语音链路的设备特性(踩过的坑)
 
-- 摄像头麦克风**静音也回传数据块**,无法靠数据量/能量判断说话结束,`voice.py` 固定录 6 秒(用户已拍板,别改成"自动结束")。
-- 对讲通道被占会重试,`record_audio` 最长重试 120 秒——和 `MCPCameraClient.call()` 的 120s 超时相等,极端情况下客户端会先抛 `TimeoutError` 而不是干净的错误信息。要调就一起调。
+- **麦克风已经能拿到连续音频了**(A 仓库 `record_audio` 的 `source=stream`, 媒体流音频轨;实测 6 秒采集 → 6.14 秒完整音频)。以前那条"静音也回传小数据块、无法判断说话结束"说的是**对讲通道**(`source=talk`, 6 秒只有 0.3 秒)—— 所以 `voice.py` 的"固定录 6 秒"是那条路逼出来的补丁, 现在**技术上可以做 VAD 分段/边听边说了**, 那才是下一步该动的地方。
+- 对讲通道被占会重试(`source="talk"` 时),`record_audio` 最长重试 120 秒——和 `MCPCameraClient.call()` 的 120s 超时相等,极端情况下客户端会先抛 `TimeoutError` 而不是干净的错误信息。要调就一起调。
 - 该分支里的"是否重启摄像头"询问只在终端(`sys.stdin.isatty()`)才弹;经 MCP stdio 调用时 stdin 是协议管道,弹了会挂起并污染协议,所以被挡掉了。
 - 静音抑制下大声短促喊话效果最好;whisper `beam_size=1` + `vad_filter` 已调好,别乱动。
 - **扬声器链路固定 16kHz**:摄像头按 16kHz 消费音频,`tts.TTS_RATE` 产出 16kHz G.711(mulaw),`play_audio` 默认 `sample_rate=16000`。改这个常量必须同步 mcp-dahua-camera 的 `camera.py::speak_file` 和 `play_audio` 工具,否则设备只收到一半数据量 → 播放卡顿/变速(缓存 key 里带了采样率,改完老的 8kHz 缓存不会被复用)。
 - 播放编码只能用 `mulaw`;实测 `alaw` 与"不加音频头"在该设备上都是静音。
+- 播报卡顿时,先到 A 仓库按 `scripts/diag_talk.py` 标定 `_SEND_INTERVAL_PERCENT`(那个值是硬件/采样率相关的标定旋钮,别当"越大越快越好"调)。
 - `analyze_image` = A 仓库 `capture` + 本地视觉;大华/IMOU 都能用,IMOU 麦克风采样率 16kHz。
 
 ## 配置(本仓库 config.ini,gitignored)
